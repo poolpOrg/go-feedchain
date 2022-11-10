@@ -19,7 +19,12 @@ type StreamReader struct {
 	Blocks       []*Block
 	Index        *Index
 	PublicKey    *ed25519.PublicKey
-	Signature    []byte
+
+	HeaderChecksum  string
+	HeaderSignature string
+
+	IndexChecksum  string
+	IndexSignature string
 }
 
 func NewReaderFromFile(pathname string) (*StreamReader, error) {
@@ -70,7 +75,12 @@ func NewReader(rd io.ReadSeekCloser) (*StreamReader, error) {
 		PublicKey:  &header.PublicKey,
 		rd:         rd,
 		dataOffset: int64(SignatureSize + HeaderSize),
-		Signature:  header.IndexSignature[:],
+
+		HeaderChecksum:  base64.RawURLEncoding.EncodeToString(headerChecksum[:]),
+		HeaderSignature: base64.RawURLEncoding.EncodeToString(headerSignature[:]),
+
+		IndexChecksum:  base64.RawURLEncoding.EncodeToString(indexChecksum[:]),
+		IndexSignature: base64.RawURLEncoding.EncodeToString(header.IndexSignature[:]),
 	}
 
 	return stream, nil

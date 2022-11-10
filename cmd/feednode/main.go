@@ -33,6 +33,8 @@ type FeedIndex struct {
 	Mentions   map[string][]string `json:"mentions"`
 	References map[string][]string `json:"references"`
 	Threads    map[string][]string `json:"threads"`
+	Digest     string              `json:"digest"`
+	Signature  string              `json:"signature"`
 }
 
 type FeedBlockPayload struct {
@@ -48,18 +50,21 @@ type FeedBlockPayloadSummary struct {
 }
 
 type FeedBlock struct {
-	Checksum     string                    `json:"digest"`
 	CreationTime int64                     `json:"creation_time"`
 	Message      string                    `json:"message"`
 	Payload      []FeedBlockPayloadSummary `json:"payload"`
 	Thread       string                    `json:"thread"`
 	Parent       string                    `json:"parent"`
+	Checksum     string                    `json:"digest"`
+	Signature    string                    `json:"signature"`
 }
 
 type FeedSummary struct {
+	PublicKey string `json:"public_key"`
 	Origin    string `json:"origin"`
 	Size      int    `json:"length"`
-	PublicKey string `json:"public_key"`
+	Checksum  string `json:"digest"`
+	Signature string `json:"signature"`
 }
 
 var repositoryPath string
@@ -183,6 +188,8 @@ func apiFeed(w http.ResponseWriter, r *http.Request) {
 	}
 
 	feedIndex := FeedIndex{}
+	feedIndex.Digest = feed.IndexChecksum
+	feedIndex.Signature = feed.IndexSignature
 	feedIndex.Records = make([]FeedIndexRecord, 0)
 	feedIndex.Hashtags = make(map[string][]string)
 	feedIndex.Mentions = make(map[string][]string)
@@ -253,6 +260,7 @@ func apiFeedBlock(w http.ResponseWriter, r *http.Request) {
 			}
 			feedBlock := FeedBlock{}
 			feedBlock.Checksum = blockId
+			feedBlock.Signature = feed.Index.Records[i].BlockSignature
 			feedBlock.CreationTime = block.CreationTime
 			feedBlock.Message = block.Message
 			feedBlock.Thread = block.Thread
@@ -425,6 +433,7 @@ func apiFeedOffset(w http.ResponseWriter, r *http.Request) {
 	}
 
 	feedBlock := FeedBlock{}
+	feedBlock.Signature = feed.Index.Records[offsetInt].BlockSignature
 	feedBlock.Checksum = feed.Index.Records[offsetInt].BlockChecksum
 	feedBlock.CreationTime = block.CreationTime
 	feedBlock.Message = block.Message
@@ -581,6 +590,8 @@ func apiFeeds(w http.ResponseWriter, r *http.Request) {
 				Origin:    r.Host,
 				Size:      len(feed.Index.Records),
 				PublicKey: feed.ID(),
+				Checksum:  feed.HeaderChecksum,
+				Signature: feed.HeaderSignature,
 			}
 
 			ret = append(ret, feedSummary)
