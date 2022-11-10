@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"encoding/xml"
 	"flag"
 	"fmt"
 	"io"
@@ -13,7 +14,9 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/gorilla/feeds"
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
 	"github.com/poolpOrg/feedchain/feedchain"
@@ -605,6 +608,53 @@ func apiFeeds(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(ret)
 }
 
+type RSSFeedsData struct {
+	ID          string `json:"id"`
+	Title       string `json:"title"`
+	Description string `json:"description"`
+}
+
+func serveRSS(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	feedId := vars["feedId"]
+
+	feed, err := feedchain.NewReaderFromFile(repositoryPath + "/" + feedId)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	feedinfo := &feeds.Feed{
+		Title:       feedId,
+		Link:        &feeds.Link{Href: "/" + feedId},
+		Description: "Feed for" + feedId,
+		Author:      &feeds.Author{Name: feedId},
+		Created:     time.Now(),
+	}
+
+	var feedItems []*feeds.Item
+	for i := 0; i < int(feed.Size()); i++ {
+		block, err := feed.Offset(uint64(i))
+		if err != nil {
+			continue
+		}
+		feedItems = append(feedItems, &feeds.Item{
+			Id:          block.ID(),
+			Title:       block.Message,
+			Link:        &feeds.Link{Href: "//" + r.Host + "/" + feedId},
+			Description: block.Message,
+			Created:     time.Now(),
+		})
+		feedinfo.Items = feedItems
+	}
+	rssFeed := (&feeds.Rss{Feed: feedinfo}).RssFeed()
+	xmlRssFeeds := rssFeed.FeedXml()
+	fmt.Println(xmlRssFeeds)
+	w.Header().Add("Content-Type", "application/rss+xml")
+
+	xml.NewEncoder(w).Encode(xmlRssFeeds)
+}
+
 func enableCORS(router *mux.Router) {
 	router.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -640,6 +690,7 @@ func main() {
 
 	r.HandleFunc("/", apiFeeds)
 	r.HandleFunc("/{feedId}", serveFeed)
+	r.HandleFunc("/{feedId}/rss", serveRSS)
 
 	r.HandleFunc("/feed/{feedId}", apiFeed)
 	r.HandleFunc("/feed/{feedId}/block/{blockId}", apiFeedBlock)
