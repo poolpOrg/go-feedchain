@@ -74,7 +74,7 @@ func Init(privateKey ed25519.PrivateKey) (*StreamWriter, error) {
 	stream.PublicKey = &publicKey
 
 	checksum := sha256.Sum256(publicKey)
-	now := time.Now()
+	now := time.Now().UnixMilli()
 	block := &Block{
 		Message:      "public key",
 		CreationTime: now,
@@ -86,7 +86,7 @@ func Init(privateKey ed25519.PrivateKey) (*StreamWriter, error) {
 	signature := ed25519.Sign(*stream.privateKey, blockChecksum[:])
 	var signature64bytes [64]byte
 	copy(signature64bytes[:], signature)
-	stream.Index.Record(uint64(len(block.ToBytes())), blockChecksum, signature64bytes)
+	stream.Index.Record(now, uint64(len(block.ToBytes())), blockChecksum, signature64bytes)
 	stream.Blocks = append(stream.Blocks, block)
 	return stream, nil
 }
@@ -187,7 +187,7 @@ func (stream *StreamWriter) Append(title string, name string, contentType string
 	lastBlock := stream.Blocks[len(stream.Blocks)-1]
 
 	parentChecksum := sha256.Sum256(lastBlock.ToBytes())
-	now := time.Now()
+	now := time.Now().UnixMilli()
 	block := &Block{
 		Message:      title,
 		CreationTime: now,
@@ -202,7 +202,7 @@ func (stream *StreamWriter) Append(title string, name string, contentType string
 	signature := ed25519.Sign(*stream.privateKey, checksum[:])
 	var signature64bytes [64]byte
 	copy(signature64bytes[:], signature)
-	stream.Index.Record(uint64(len(block.ToBytes())), checksum, signature64bytes)
+	stream.Index.Record(now, uint64(len(block.ToBytes())), checksum, signature64bytes)
 
 	for _, tag := range parseTags(title) {
 		stream.Index.Tag(tag, checksum)

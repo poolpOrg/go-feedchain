@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"time"
+	"log"
 )
 
 type Payload struct {
@@ -14,7 +14,7 @@ type Payload struct {
 }
 
 type Block struct {
-	CreationTime time.Time `json:"creation_time"`
+	CreationTime int64     `json:"creation_time"`
 	Message      string    `json:"message"`
 	Payload      []Payload `json:"payloads"`
 	Thread       string    `json:"thread"`
@@ -25,6 +25,7 @@ func NewBlockFromBytes(buffer []byte) *Block {
 	var block Block
 	err := json.Unmarshal(buffer, &block)
 	if err != nil {
+		log.Fatal(err)
 		panic("block.NewBlockFromBytes")
 	}
 	return &block

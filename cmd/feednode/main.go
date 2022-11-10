@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gorilla/handlers"
 	"github.com/gorilla/mux"
@@ -21,10 +20,11 @@ import (
 )
 
 type FeedIndexRecord struct {
-	Offset    uint64 `json:"offset"`
-	Length    uint64 `json:"length"`
-	Checksum  string `json:"digest"`
-	Signature string `json:"signature"`
+	CreationTime int64  `json:"creation_time"`
+	Offset       uint64 `json:"offset"`
+	Length       uint64 `json:"length"`
+	Checksum     string `json:"digest"`
+	Signature    string `json:"signature"`
 }
 
 type FeedIndex struct {
@@ -49,7 +49,7 @@ type FeedBlockPayloadSummary struct {
 
 type FeedBlock struct {
 	Checksum     string                    `json:"digest"`
-	CreationTime time.Time                 `json:"creation_time"`
+	CreationTime int64                     `json:"creation_time"`
 	Message      string                    `json:"message"`
 	Payload      []FeedBlockPayloadSummary `json:"payload"`
 	Thread       string                    `json:"thread"`
@@ -191,10 +191,11 @@ func apiFeed(w http.ResponseWriter, r *http.Request) {
 
 	for _, record := range feed.Index.Records {
 		feedIndex.Records = append(feedIndex.Records, FeedIndexRecord{
-			Offset:    record.BlockOffset,
-			Length:    record.BlockLen,
-			Checksum:  record.BlockChecksum,
-			Signature: record.BlockSignature,
+			CreationTime: record.CreationTime,
+			Offset:       record.BlockOffset,
+			Length:       record.BlockLen,
+			Checksum:     record.BlockChecksum,
+			Signature:    record.BlockSignature,
 		})
 	}
 

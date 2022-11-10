@@ -7,6 +7,7 @@ import (
 )
 
 type indexRecord struct {
+	CreationTime   int64  `json:"creation_time"`
 	BlockOffset    uint64 `json:"offset"`
 	BlockLen       uint64 `json:"length"`
 	BlockChecksum  string `json:"digest"`
@@ -48,12 +49,13 @@ func (index *Index) ToBytes() []byte {
 	return serialized
 }
 
-func (index *Index) Record(blockLen uint64, blockChecksum [32]byte, blockSignature [64]byte) {
+func (index *Index) Record(creationTime int64, blockLen uint64, blockChecksum [32]byte, blockSignature [64]byte) {
 	blockOffset := uint64(0)
 	if len(index.Records) != 0 {
 		blockOffset = index.Records[len(index.Records)-1].BlockOffset + index.Records[len(index.Records)-1].BlockLen
 	}
 	index.Records = append(index.Records, indexRecord{
+		CreationTime:   creationTime,
 		BlockOffset:    blockOffset,
 		BlockLen:       blockLen,
 		BlockChecksum:  base64.RawURLEncoding.EncodeToString(blockChecksum[:]),
