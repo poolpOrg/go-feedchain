@@ -593,11 +593,6 @@ func apiFeeds(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(ret)
 }
 
-func apiNodes(w http.ResponseWriter, r *http.Request) {
-	ret := make([]string, 0)
-	json.NewEncoder(w).Encode(ret)
-}
-
 func enableCORS(router *mux.Router) {
 	router.PathPrefix("/").HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -642,8 +637,6 @@ func main() {
 	r.HandleFunc("/feed/{feedId}/offset/{offset}", apiFeedOffset)
 	r.HandleFunc("/feed/{feedId}/offset/{offset}/payload/{payloadOffset}", apiFeedOffsetPayloadOffset)
 	r.HandleFunc("/feed/{feedId}/offset/{offset}/payload/{payloadOffset}/raw", apiFeedOffsetPayloadOffsetRaw)
-
-	r.HandleFunc("/api/nodes", apiNodes)
 
 	err = http.ListenAndServe(fmt.Sprintf(":%d", port), handlers.CombinedLoggingHandler(os.Stdout, r))
 	if err != nil {
