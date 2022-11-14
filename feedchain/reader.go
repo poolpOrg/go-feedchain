@@ -18,6 +18,7 @@ type StreamReader struct {
 	CreationTime time.Time
 	Blocks       []*Block
 	Index        *Index
+	Metadata     *Metadata
 	PublicKey    *ed25519.PublicKey
 
 	HeaderChecksum  string
@@ -25,6 +26,9 @@ type StreamReader struct {
 
 	IndexChecksum  string
 	IndexSignature string
+
+	MetadataChecksum  string
+	MetadataSignature string
 }
 
 func NewReaderFromFile(pathname string) (*StreamReader, error) {
@@ -70,8 +74,22 @@ func NewReader(rd io.ReadSeekCloser) (*StreamReader, error) {
 		return nil, fmt.Errorf("index checksum verification failed")
 	}
 
+	_, err = rd.Seek(SignatureSize+HeaderSize+int64(header.MetadataOffset), 0)
+	if err != nil {
+		return nil, err
+	}
+	metadataBuf := make([]byte, header.MetadataLength)
+	rd.Read(metadataBuf)
+	metadata := NewMetadataFromBytes(metadataBuf)
+	metadataChecksum := sha256.Sum256(metadataBuf[:])
+
+	if !bytes.Equal(metadataChecksum[:], header.MetadataChecksum[:]) {
+		return nil, fmt.Errorf("metadata checksum verification failed")
+	}
+
 	stream := &StreamReader{
 		Index:      index,
+		Metadata:   metadata,
 		PublicKey:  &header.PublicKey,
 		rd:         rd,
 		dataOffset: int64(SignatureSize + HeaderSize),
@@ -81,6 +99,9 @@ func NewReader(rd io.ReadSeekCloser) (*StreamReader, error) {
 
 		IndexChecksum:  base64.RawURLEncoding.EncodeToString(indexChecksum[:]),
 		IndexSignature: base64.RawURLEncoding.EncodeToString(header.IndexSignature[:]),
+
+		MetadataChecksum:  base64.RawURLEncoding.EncodeToString(metadataChecksum[:]),
+		MetadataSignature: base64.RawURLEncoding.EncodeToString(header.MetadataSignature[:]),
 	}
 
 	return stream, nil

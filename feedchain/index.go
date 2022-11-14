@@ -15,6 +15,10 @@ type indexRecord struct {
 }
 
 type Index struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Picture     string `json:"picture"`
+
 	Records    []indexRecord       `json:"records"`
 	Hashtags   map[string][]string `json:"hashtags"`
 	Mentions   map[string][]string `json:"mentions"`

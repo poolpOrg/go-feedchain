@@ -20,6 +20,7 @@ type StreamWriter struct {
 
 	Blocks    []*Block
 	Index     *Index
+	Metadata  *Metadata
 	PublicKey *ed25519.PublicKey
 	Signature []byte
 }
@@ -64,8 +65,9 @@ func parseRefs(title string) []string {
 
 func Init(privateKey ed25519.PrivateKey) (*StreamWriter, error) {
 	stream := &StreamWriter{
-		Blocks: make([]*Block, 0),
-		Index:  NewIndex(),
+		Blocks:   make([]*Block, 0),
+		Index:    NewIndex(),
+		Metadata: NewMetadata(),
 	}
 
 	publicKey := privateKey.Public().(ed25519.PublicKey)
@@ -227,11 +229,23 @@ func (stream *StreamWriter) Commit(pathname string) error {
 		indexOffset += entry.BlockLen
 	}
 
+	metadataBytes := stream.Metadata.ToBytes()
+	metadataChecksum := sha256.Sum256(metadataBytes)
+	metadataSignature := ed25519.Sign(*stream.privateKey, metadataChecksum[:])
+	var metadataSignature64 [64]byte
+	copy(metadataSignature64[:], metadataSignature)
+
+	metadataOffset := indexOffset + uint64(len(indexBytes))
+
 	header := NewHeader(stream)
 	header.IndexOffset = indexOffset
 	header.IndexLength = uint64(len(indexBytes))
 	header.IndexChecksum = indexChecksum
 	header.IndexSignature = indexSignature64
+	header.MetadataOffset = metadataOffset
+	header.MetadataLength = uint64(len(metadataBytes))
+	header.MetadataChecksum = metadataChecksum
+	header.MetadataSignature = metadataSignature64
 
 	headerBytes := header.ToBytes()
 	headerChecksum := sha256.Sum256(headerBytes[:])
@@ -263,6 +277,11 @@ func (stream *StreamWriter) Commit(pathname string) error {
 	}
 
 	_, err = wr.Write(indexBytes)
+	if err != nil {
+		return err
+	}
+
+	_, err = wr.Write(metadataBytes)
 	if err != nil {
 		return err
 	}
