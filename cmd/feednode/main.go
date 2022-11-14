@@ -66,8 +66,12 @@ type FeedSummary struct {
 	PublicKey string `json:"public_key"`
 	Origin    string `json:"origin"`
 	Size      int    `json:"length"`
-	Checksum  string `json:"digest"`
-	Signature string `json:"signature"`
+
+	Name        string `json:"name"`
+	DisplayName string `json:"display_name"`
+	Description string `json:"description"`
+	Location    string `json:"location"`
+	Picture     string `json:"picture"`
 }
 
 var repositoryPath string
@@ -590,11 +594,15 @@ func apiFeeds(w http.ResponseWriter, r *http.Request) {
 			defer feed.Close()
 
 			feedSummary := FeedSummary{
-				Origin:    r.Host,
+				Origin:    feed.Metadata.Origin,
 				Size:      len(feed.Index.Records),
 				PublicKey: feed.ID(),
-				Checksum:  feed.HeaderChecksum,
-				Signature: feed.HeaderSignature,
+
+				Name:        feed.Metadata.Name,
+				DisplayName: feed.Metadata.DisplayName,
+				Description: feed.Metadata.Description,
+				Location:    feed.Metadata.Location,
+				Picture:     feed.Metadata.Picture,
 			}
 
 			ret = append(ret, feedSummary)
