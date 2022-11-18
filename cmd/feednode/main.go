@@ -207,65 +207,6 @@ func apiLookup(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	json.NewEncoder(w).Encode(ret)
-
-	/*
-		feed, err := feedchain.NewReaderFromFile(repositoryPath + "/" + feedId)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		defer feed.Close()
-
-		if feed.ID() != feedId {
-			http.Error(w, err.Error(), http.StatusForbidden)
-			return
-		}
-
-		feedIndex := FeedIndex{}
-		feedIndex.Digest = feed.IndexChecksum
-		feedIndex.Signature = feed.IndexSignature
-		feedIndex.Records = make([]FeedIndexRecord, 0)
-		feedIndex.Hashtags = make(map[string][]string)
-		feedIndex.Mentions = make(map[string][]string)
-		feedIndex.References = make(map[string][]string)
-		feedIndex.Threads = make(map[string][]string)
-
-		for _, record := range feed.Index.Records {
-			feedIndex.Records = append(feedIndex.Records, FeedIndexRecord{
-				CreationTime: record.CreationTime,
-				Offset:       record.BlockOffset,
-				Length:       record.BlockLen,
-				Checksum:     record.BlockChecksum,
-				Signature:    record.BlockSignature,
-			})
-		}
-
-		for hashtag, checksums := range feed.Index.Hashtags {
-			for _, checksum := range checksums {
-				feedIndex.Hashtags[hashtag] = append(feedIndex.Hashtags[hashtag], checksum)
-			}
-		}
-
-		for mention, checksums := range feed.Index.Mentions {
-			for _, checksum := range checksums {
-				feedIndex.Mentions[mention] = append(feedIndex.Mentions[mention], checksum)
-			}
-		}
-
-		for reference, checksums := range feed.Index.References {
-			for _, checksum := range checksums {
-				feedIndex.References[reference] = append(feedIndex.References[reference], checksum)
-			}
-		}
-
-		for thread, checksums := range feed.Index.Threads {
-			for _, checksum := range checksums {
-				feedIndex.Threads[thread] = append(feedIndex.Threads[thread], checksum)
-			}
-		}
-
-		json.NewEncoder(w).Encode(feedIndex)
-	*/
 }
 
 func apiFeed(w http.ResponseWriter, r *http.Request) {
