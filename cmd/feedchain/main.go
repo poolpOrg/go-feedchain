@@ -305,6 +305,7 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
+		os.Exit(0)
 	}
 
 	WatchFeeds = make(map[string]*FeedWatcher)
@@ -326,7 +327,7 @@ func main() {
 			feed.Append(opt_write)
 			feed.Commit(path.Join(workdir, feed.ID()))
 		}
-		os.Exit(1)
+		os.Exit(0)
 	}
 
 	if opt_write != "" {
@@ -337,7 +338,7 @@ func main() {
 			feed.Append(opt_write)
 			feed.Commit(path.Join(workdir, feed.ID()))
 		}
-		os.Exit(1)
+		os.Exit(0)
 	}
 
 	if opt_name != "" {
@@ -348,7 +349,7 @@ func main() {
 			feed.Metadata.Name = opt_name
 			feed.Commit(path.Join(workdir, feed.ID()))
 		}
-		os.Exit(1)
+		os.Exit(0)
 	}
 
 	if opt_publish {
@@ -371,17 +372,17 @@ func main() {
 			}
 			defer res.Body.Close()
 		}
-		os.Exit(1)
+		os.Exit(0)
 	}
 
 	if opt_follow != "" {
 		addFollow(opt_node, workdir, opt_follow)
-		os.Exit(1)
+		os.Exit(0)
 	}
 
 	if opt_unfollow != "" {
 		removeFollow(workdir, opt_unfollow)
-		os.Exit(1)
+		os.Exit(0)
 	}
 
 	go watchFeeds(workdir)
