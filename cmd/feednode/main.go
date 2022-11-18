@@ -724,11 +724,11 @@ func main() {
 	//r.HandleFunc("/", apiFeeds)
 	//r.HandleFunc("/feeds", apiFeeds)
 
-	r.HandleFunc("/", empty)
-	r.HandleFunc("/{feedId}", serveFeed)
-	r.HandleFunc("/{feedId}/rss", serveRSS)
-
 	r.HandleFunc("/lookup/{name}", apiLookup)
+
+	r.HandleFunc("/", empty)
+	r.HandleFunc("/{feedId}/rss", serveRSS)
+	r.HandleFunc("/{feedId}", serveFeed)
 
 	r.HandleFunc("/api/{feedId}", apiFeed)
 	r.HandleFunc("/api/{feedId}/block/{blockId}", apiFeedBlock)
