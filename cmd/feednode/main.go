@@ -76,6 +76,9 @@ type FeedSummary struct {
 
 var repositoryPath string
 
+func empty(w http.ResponseWriter, r *http.Request) {
+}
+
 func serveFeed(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	feedId := vars["feedId"]
@@ -696,7 +699,8 @@ func main() {
 	r := mux.NewRouter()
 	enableCORS(r)
 
-	r.HandleFunc("/", apiFeeds)
+	//r.HandleFunc("/", apiFeeds)
+	r.HandleFunc("/", empty)
 	r.HandleFunc("/{feedId}", serveFeed)
 	r.HandleFunc("/{feedId}/rss", serveRSS)
 
