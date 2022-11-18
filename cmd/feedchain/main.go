@@ -166,6 +166,9 @@ func loadWatchFeeds2(workdir string) error {
 	WatchFeeds = make(map[string]string)
 	fsys := os.DirFS(path.Join(workdir, "follows"))
 	fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
 		if d.Type().IsRegular() {
 			WatchFeeds[d.Name()] = p
 		}
