@@ -138,9 +138,11 @@ func (stream *StreamReader) Offset(offset uint64) (*Block, error) {
 	}
 
 	blockBuffer := make([]byte, record.BlockLen)
-	_, err = stream.rd.Read(blockBuffer)
+	n, err := stream.rd.Read(blockBuffer)
 	if err != nil {
-		return nil, err
+		if err == io.EOF && n != int(record.BlockLen) {
+			return nil, err
+		}
 	}
 	checksum := sha256.Sum256(blockBuffer)
 

@@ -63,13 +63,18 @@ func (fw *FeedWatcher) Run() {
 			}
 			block, err := rd.Offset(uint64(i))
 			if err != nil {
-				fmt.Printf("[warning] could not obtain block %d for %s, pausing source\n", i, fw.publicKey)
+				fmt.Printf("[warning] could not obtain block %d for %s, pausing source: %s\n", i, fw.publicKey, err)
 				break
 			}
 			lastBlockCtime = int(block.CreationTime)
 
-			unixTimeUTC := time.UnixMilli(block.CreationTime)
-			fmt.Printf("[%s] %s: %s\n", unixTimeUTC.Format(time.RFC3339), rd.ID(), block.Message)
+			unixTimeUTC := time.UnixMilli(block.CreationTime).Format(time.RFC3339)
+			if rd.Metadata.Name != "" {
+				fmt.Printf("[%s] %s: %s\n", unixTimeUTC, rd.Metadata.Name, block.Message)
+			} else {
+				fmt.Printf("[%s] %s: %s\n", unixTimeUTC, rd.ID(), block.Message)
+			}
+
 		}
 
 		rd.Close()
@@ -203,12 +208,14 @@ func main() {
 	var opt_publish bool
 	var opt_node string
 	var opt_follow string
+	var opt_name string
 
 	flag.BoolVar(&opt_create, "create", false, "create the feedchain")
 	flag.StringVar(&opt_write, "write", "", "write a message to the feedchain")
 	flag.BoolVar(&opt_publish, "publish", false, "publish the feedchain")
 	flag.StringVar(&opt_node, "node", "https://feeds.poolp.org", "set the default node for network operations")
 	flag.StringVar(&opt_follow, "follow", "", "feed to follow")
+	flag.StringVar(&opt_name, "name", "", "update feed name")
 
 	flag.Parse()
 
@@ -263,6 +270,17 @@ func main() {
 		}
 		for _, feed := range OwnFeeds {
 			feed.Append(opt_write)
+			feed.Commit(path.Join(workdir, feed.ID()))
+		}
+		os.Exit(1)
+	}
+
+	if opt_name != "" {
+		if len(OwnFeeds) != 1 {
+			log.Fatal("need to select a specific feed")
+		}
+		for _, feed := range OwnFeeds {
+			feed.Metadata.Name = opt_name
 			feed.Commit(path.Join(workdir, feed.ID()))
 		}
 		os.Exit(1)

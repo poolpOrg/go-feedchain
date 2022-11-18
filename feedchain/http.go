@@ -60,6 +60,7 @@ func (hr *HTTPReader) Read(buf []byte) (int, error) {
 	if err != nil {
 		return 0, err
 	}
+
 	req.Header.Add("Range", fmt.Sprintf("bytes=%d-%d", hr.offset, hr.offset+int64(len(buf))))
 	resp, err := hr.client.Do(req)
 	if err != nil {
