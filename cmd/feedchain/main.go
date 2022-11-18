@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -22,15 +23,26 @@ import (
 
 var Keys map[string][]byte
 var OwnFeeds map[string]*feedchain.StreamWriter
-var WatchFeeds map[string]string
+var WatchFeeds map[string]*FeedWatcher
 
 type FeedWatcher struct {
 	publicKey string
 	source    string
+	done      bool
+}
+
+type FeedSummary struct {
+	PublicKey string `json:"public_key"`
+	Origin    string `json:"origin"`
+	Size      int    `json:"length"`
 }
 
 func NewFeedWatcher(publicKey string, source string) *FeedWatcher {
-	return &FeedWatcher{publicKey: publicKey, source: source}
+	return &FeedWatcher{publicKey: publicKey, source: source, done: false}
+}
+
+func (fw *FeedWatcher) Stop() {
+	fw.done = true
 }
 
 func (fw *FeedWatcher) Run() {
@@ -41,6 +53,10 @@ func (fw *FeedWatcher) Run() {
 	begin := time.Now().AddDate(0, 0, -7).UnixMilli()
 
 	for {
+		if fw.done {
+			break
+		}
+
 		time.Sleep(refreshRate * time.Second)
 
 		rd, err := feedchain.NewReaderFromURL(fw.source)
@@ -153,38 +169,71 @@ func loadOwnFeeds(workdir string) error {
 	return nil
 }
 
-func loadWatchFeeds(workdir string) error {
-	WatchFeeds = make(map[string]string)
-	files, err := ioutil.ReadDir(path.Join(workdir))
-	if err != nil {
-		return err
-	}
-	for _, f := range files {
-		if !f.IsDir() {
-			WatchFeeds[f.Name()] = path.Join(workdir, f.Name())
+func watchFeeds(workdir string) error {
+	for {
+		feeds := make(map[string]bool)
+		fsys := os.DirFS(path.Join(workdir, "follows"))
+		fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			if d.Type().IsRegular() {
+				feeds[d.Name()] = true
+				if _, exists := WatchFeeds[d.Name()]; !exists {
+					WatchFeeds[d.Name()] = NewFeedWatcher(d.Name(), p)
+					go WatchFeeds[d.Name()].Run()
+
+				}
+			}
+			return nil
+		})
+
+		for key, _ := range WatchFeeds {
+			if _, exists := feeds[key]; !exists {
+				WatchFeeds[key].Stop()
+				delete(WatchFeeds, key)
+			}
 		}
+		time.Sleep(1 * time.Second)
 	}
-	return nil
 }
 
-func loadWatchFeeds2(workdir string) error {
-	WatchFeeds = make(map[string]string)
-	fsys := os.DirFS(path.Join(workdir, "follows"))
-	fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+func addFollow(node string, workdir string, follow string) error {
+	if !strings.Contains(follow, "/") {
+		r, err := http.NewRequest("GET", node+"/lookup/"+follow, nil)
+		if err != nil {
+			panic(err)
+		}
+		client := &http.Client{}
+		res, err := client.Do(r)
+		if err != nil {
+			panic(err)
+		}
+		defer res.Body.Close()
+
+		var ret []FeedSummary
+		err = json.NewDecoder(res.Body).Decode(&ret)
 		if err != nil {
 			return err
 		}
-		if d.Type().IsRegular() {
-			WatchFeeds[d.Name()] = p
-		}
-		return nil
-	})
-	return nil
-}
 
-func addFollow(workdir string, follow string) error {
-	if strings.Contains(follow, "@") {
-		fmt.Println("trying to follow a user")
+		for _, record := range ret {
+			rd, err := feedchain.NewReaderFromURL(node + "/" + record.PublicKey)
+			if err != nil {
+				return err
+			}
+			tmp := strings.Split(node, "://")
+			origin := tmp[1]
+
+			os.MkdirAll(path.Join(workdir, "follows", origin), 0700)
+			fp, err := os.Create(path.Join(workdir, "follows", origin, rd.ID()))
+			if err != nil {
+				return err
+			}
+			fp.Close()
+			rd.Close()
+		}
+
 	} else {
 		rd, err := feedchain.NewReaderFromURL(follow)
 		if err != nil {
@@ -198,7 +247,29 @@ func addFollow(workdir string, follow string) error {
 			return err
 		}
 		fp.Close()
+		rd.Close()
 	}
+	return nil
+}
+
+func removeFollow(workdir string, follow string) error {
+	fsys := os.DirFS(path.Join(workdir, "follows"))
+	fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Type().IsRegular() {
+			rd, err := feedchain.NewReaderFromURL(p)
+			if err != nil {
+				return err
+			}
+			if follow == rd.ID() || follow == rd.Metadata.Name {
+				os.Remove(path.Join(workdir, "follows", p))
+			}
+			rd.Close()
+		}
+		return nil
+	})
 	return nil
 }
 
@@ -208,6 +279,7 @@ func main() {
 	var opt_publish bool
 	var opt_node string
 	var opt_follow string
+	var opt_unfollow string
 	var opt_name string
 
 	flag.BoolVar(&opt_create, "create", false, "create the feedchain")
@@ -215,6 +287,7 @@ func main() {
 	flag.BoolVar(&opt_publish, "publish", false, "publish the feedchain")
 	flag.StringVar(&opt_node, "node", "https://feeds.poolp.org", "set the default node for network operations")
 	flag.StringVar(&opt_follow, "follow", "", "feed to follow")
+	flag.StringVar(&opt_unfollow, "unfollow", "", "feed to unfollow")
 	flag.StringVar(&opt_name, "name", "", "update feed name")
 
 	flag.Parse()
@@ -234,21 +307,13 @@ func main() {
 		}
 	}
 
+	WatchFeeds = make(map[string]*FeedWatcher)
+
 	err = loadKeys(workdir)
 	if err != nil {
 		log.Fatal(err)
 	}
 	err = loadOwnFeeds(workdir)
-	if err != nil {
-		log.Fatal(err)
-	}
-	/*
-		err = loadWatchFeeds(workdir)
-		if err != nil {
-			log.Fatal(err)
-		}
-	*/
-	err = loadWatchFeeds2(workdir)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -310,15 +375,16 @@ func main() {
 	}
 
 	if opt_follow != "" {
-		addFollow(workdir, opt_follow)
+		addFollow(opt_node, workdir, opt_follow)
 		os.Exit(1)
 	}
 
-	for publicKey, feedSource := range WatchFeeds {
-		go NewFeedWatcher(publicKey, feedSource).Run()
+	if opt_unfollow != "" {
+		removeFollow(workdir, opt_unfollow)
+		os.Exit(1)
 	}
 
-	c := make(chan bool)
-	<-c
-
+	go watchFeeds(workdir)
+	done := make(chan bool)
+	<-done
 }
