@@ -70,7 +70,7 @@ func (fw *FeedWatcher) Run() {
 
 			unixTimeUTC := time.UnixMilli(block.CreationTime).Format(time.RFC3339)
 			if rd.Metadata.Name != "" {
-				fmt.Printf("[%s] %s: %s\n", unixTimeUTC, rd.Metadata.Name, block.Message)
+				fmt.Printf("[%s] @%s (%s...%s): %s\n", unixTimeUTC, rd.Metadata.Name, rd.ID()[0:4], rd.ID()[len(rd.ID())-4:], block.Message)
 			} else {
 				fmt.Printf("[%s] %s: %s\n", unixTimeUTC, rd.ID(), block.Message)
 			}

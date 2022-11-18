@@ -66,12 +66,6 @@ type FeedSummary struct {
 	PublicKey string `json:"public_key"`
 	Origin    string `json:"origin"`
 	Size      int    `json:"length"`
-
-	Name        string `json:"name"`
-	DisplayName string `json:"display_name"`
-	Description string `json:"description"`
-	Location    string `json:"location"`
-	Picture     string `json:"picture"`
 }
 
 var repositoryPath string
@@ -179,6 +173,99 @@ func serveFeed(w http.ResponseWriter, r *http.Request) {
 
 		feed.Close()
 	}
+}
+
+func apiLookup(w http.ResponseWriter, r *http.Request) {
+	vars := mux.Vars(r)
+	name := vars["name"]
+
+	ret := make([]FeedSummary, 0)
+	err := filepath.Walk(repositoryPath, func(path string, info os.FileInfo, err error) error {
+		if !info.IsDir() {
+			feed, err := feedchain.NewReaderFromFile(path)
+			if err != nil {
+				return nil
+			}
+			defer feed.Close()
+
+			if strings.ToLower(feed.Metadata.Name) != strings.ToLower(name) {
+				return nil
+			}
+
+			feedSummary := FeedSummary{
+				Origin:    feed.Metadata.Origin,
+				Size:      len(feed.Index.Records),
+				PublicKey: feed.ID(),
+			}
+
+			ret = append(ret, feedSummary)
+		}
+		return nil
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	json.NewEncoder(w).Encode(ret)
+
+	/*
+		feed, err := feedchain.NewReaderFromFile(repositoryPath + "/" + feedId)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		defer feed.Close()
+
+		if feed.ID() != feedId {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
+
+		feedIndex := FeedIndex{}
+		feedIndex.Digest = feed.IndexChecksum
+		feedIndex.Signature = feed.IndexSignature
+		feedIndex.Records = make([]FeedIndexRecord, 0)
+		feedIndex.Hashtags = make(map[string][]string)
+		feedIndex.Mentions = make(map[string][]string)
+		feedIndex.References = make(map[string][]string)
+		feedIndex.Threads = make(map[string][]string)
+
+		for _, record := range feed.Index.Records {
+			feedIndex.Records = append(feedIndex.Records, FeedIndexRecord{
+				CreationTime: record.CreationTime,
+				Offset:       record.BlockOffset,
+				Length:       record.BlockLen,
+				Checksum:     record.BlockChecksum,
+				Signature:    record.BlockSignature,
+			})
+		}
+
+		for hashtag, checksums := range feed.Index.Hashtags {
+			for _, checksum := range checksums {
+				feedIndex.Hashtags[hashtag] = append(feedIndex.Hashtags[hashtag], checksum)
+			}
+		}
+
+		for mention, checksums := range feed.Index.Mentions {
+			for _, checksum := range checksums {
+				feedIndex.Mentions[mention] = append(feedIndex.Mentions[mention], checksum)
+			}
+		}
+
+		for reference, checksums := range feed.Index.References {
+			for _, checksum := range checksums {
+				feedIndex.References[reference] = append(feedIndex.References[reference], checksum)
+			}
+		}
+
+		for thread, checksums := range feed.Index.Threads {
+			for _, checksum := range checksums {
+				feedIndex.Threads[thread] = append(feedIndex.Threads[thread], checksum)
+			}
+		}
+
+		json.NewEncoder(w).Encode(feedIndex)
+	*/
 }
 
 func apiFeed(w http.ResponseWriter, r *http.Request) {
@@ -600,12 +687,6 @@ func apiFeeds(w http.ResponseWriter, r *http.Request) {
 				Origin:    feed.Metadata.Origin,
 				Size:      len(feed.Index.Records),
 				PublicKey: feed.ID(),
-
-				Name:        feed.Metadata.Name,
-				DisplayName: feed.Metadata.DisplayName,
-				Description: feed.Metadata.Description,
-				Location:    feed.Metadata.Location,
-				Picture:     feed.Metadata.Picture,
 			}
 
 			ret = append(ret, feedSummary)
@@ -700,18 +781,22 @@ func main() {
 	enableCORS(r)
 
 	//r.HandleFunc("/", apiFeeds)
+	//r.HandleFunc("/feeds", apiFeeds)
+
 	r.HandleFunc("/", empty)
 	r.HandleFunc("/{feedId}", serveFeed)
 	r.HandleFunc("/{feedId}/rss", serveRSS)
 
-	r.HandleFunc("/feed/{feedId}", apiFeed)
-	r.HandleFunc("/feed/{feedId}/block/{blockId}", apiFeedBlock)
-	r.HandleFunc("/feed/{feedId}/block/{blockId}/payload/{payloadOffset}", apiFeedBlockPayloadOffset)
-	r.HandleFunc("/feed/{feedId}/block/{blockId}/payload/{payloadOffset}/raw", apiFeedBlockPayloadOffsetRaw)
+	r.HandleFunc("/lookup/{name}", apiLookup)
 
-	r.HandleFunc("/feed/{feedId}/offset/{offset}", apiFeedOffset)
-	r.HandleFunc("/feed/{feedId}/offset/{offset}/payload/{payloadOffset}", apiFeedOffsetPayloadOffset)
-	r.HandleFunc("/feed/{feedId}/offset/{offset}/payload/{payloadOffset}/raw", apiFeedOffsetPayloadOffsetRaw)
+	r.HandleFunc("/api/{feedId}", apiFeed)
+	r.HandleFunc("/api/{feedId}/block/{blockId}", apiFeedBlock)
+	r.HandleFunc("/api/{feedId}/block/{blockId}/payload/{payloadOffset}", apiFeedBlockPayloadOffset)
+	r.HandleFunc("/api/{feedId}/block/{blockId}/payload/{payloadOffset}/raw", apiFeedBlockPayloadOffsetRaw)
+
+	r.HandleFunc("/api/{feedId}/offset/{offset}", apiFeedOffset)
+	r.HandleFunc("/api/{feedId}/offset/{offset}/payload/{payloadOffset}", apiFeedOffsetPayloadOffset)
+	r.HandleFunc("/api/{feedId}/offset/{offset}/payload/{payloadOffset}/raw", apiFeedOffsetPayloadOffsetRaw)
 
 	err = http.ListenAndServe(fmt.Sprintf(":%d", port), handlers.CombinedLoggingHandler(os.Stdout, r))
 	if err != nil {
