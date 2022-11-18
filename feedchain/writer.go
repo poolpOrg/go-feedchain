@@ -16,7 +16,6 @@ import (
 type StreamWriter struct {
 	privateKey *ed25519.PrivateKey
 	key        []byte
-	name       string
 
 	Blocks    []*Block
 	Index     *Index
@@ -74,22 +73,6 @@ func Init(privateKey ed25519.PrivateKey) (*StreamWriter, error) {
 
 	stream.privateKey = &privateKey
 	stream.PublicKey = &publicKey
-
-	checksum := sha256.Sum256(publicKey)
-	now := time.Now().UnixMilli()
-	block := &Block{
-		Message:      "public key",
-		CreationTime: now,
-		Parent:       base64.RawStdEncoding.EncodeToString(checksum[:]),
-	}
-	block.Payload = append(block.Payload, Payload{"public key", "application/octet-stream", base64.RawStdEncoding.EncodeToString(publicKey)})
-
-	blockChecksum := sha256.Sum256(block.ToBytes())
-	signature := ed25519.Sign(*stream.privateKey, blockChecksum[:])
-	var signature64bytes [64]byte
-	copy(signature64bytes[:], signature)
-	stream.Index.Record(now, uint64(len(block.ToBytes())), blockChecksum, signature64bytes)
-	stream.Blocks = append(stream.Blocks, block)
 	return stream, nil
 }
 
@@ -126,6 +109,19 @@ func NewWriter(privateKey ed25519.PrivateKey, pathname string) (*StreamWriter, e
 		return nil, fmt.Errorf("index checksum verification failed")
 	}
 
+	_, err = f.Seek(SignatureSize+HeaderSize+int64(header.MetadataOffset), 0)
+	if err != nil {
+		return nil, err
+	}
+	metadataBuf := make([]byte, header.MetadataLength)
+	f.Read(metadataBuf)
+	metadata := NewMetadataFromBytes(metadataBuf)
+	metadataChecksum := sha256.Sum256(metadataBuf[:])
+
+	if !bytes.Equal(metadataChecksum[:], header.MetadataChecksum[:]) {
+		return nil, fmt.Errorf("metadata checksum verification failed")
+	}
+
 	_, err = f.Seek(SignatureSize+HeaderSize, 0)
 	if err != nil {
 		return nil, err
@@ -134,6 +130,7 @@ func NewWriter(privateKey ed25519.PrivateKey, pathname string) (*StreamWriter, e
 	stream := &StreamWriter{
 		Blocks:     make([]*Block, 0),
 		Index:      NewIndexFromBytes(indexBuf),
+		Metadata:   metadata,
 		PublicKey:  &header.PublicKey,
 		privateKey: (*ed25519.PrivateKey)(&privateKey),
 		Signature:  header.IndexSignature[:],
@@ -163,10 +160,6 @@ func (stream *StreamWriter) ID() string {
 	return base64.RawURLEncoding.EncodeToString(*stream.PublicKey)
 }
 
-func (stream *StreamWriter) Name() string {
-	return stream.name
-}
-
 func (stream *StreamWriter) Verify(block *Block) bool {
 	checksum := sha256.Sum256(block.ToBytes())
 	for _, record := range stream.Index.Records {
@@ -185,18 +178,20 @@ func (stream *StreamWriter) Writeable() bool {
 	return stream.privateKey != nil
 }
 
-func (stream *StreamWriter) Append(title string, name string, contentType string, data []byte) error {
-	lastBlock := stream.Blocks[len(stream.Blocks)-1]
+func (stream *StreamWriter) Append(title string) error {
+	var parentChecksum [32]byte
+	if len(stream.Index.Records) == 0 {
+		parentChecksum = sha256.Sum256(*stream.PublicKey)
+	} else {
+		lastBlock := stream.Blocks[len(stream.Blocks)-1]
+		parentChecksum = sha256.Sum256(lastBlock.ToBytes())
+	}
 
-	parentChecksum := sha256.Sum256(lastBlock.ToBytes())
 	now := time.Now().UnixMilli()
 	block := &Block{
 		Message:      title,
 		CreationTime: now,
 		Parent:       base64.RawStdEncoding.EncodeToString(parentChecksum[:]),
-	}
-	if contentType != "" {
-		block.Payload = append(block.Payload, Payload{name, contentType, base64.RawStdEncoding.EncodeToString(data)})
 	}
 	stream.Blocks = append(stream.Blocks, block)
 
