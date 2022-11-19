@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/base64"
@@ -198,79 +197,6 @@ func main() {
 	workdir := path.Join(userDefault.HomeDir, ".feedchain")
 	os.MkdirAll(workdir, 0700)
 	os.MkdirAll(path.Join(workdir, "keys"), 0700)
-
-	if opt_create {
-		err := createFeedchain(workdir)
-		if err != nil {
-			log.Fatal(err)
-		}
-		os.Exit(0)
-	}
-
-	err = loadKeys(workdir)
-	if err != nil {
-		log.Fatal(err)
-	}
-	err = loadOwnFeeds(workdir)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	if opt_write != "" {
-		if len(OwnFeeds) != 1 {
-			log.Fatal("need to select a specific feed")
-		}
-		for _, feed := range OwnFeeds {
-			feed.Append(opt_write)
-			feed.Commit(path.Join(workdir, feed.ID()))
-		}
-		os.Exit(0)
-	}
-
-	if opt_write != "" {
-		if len(OwnFeeds) != 1 {
-			log.Fatal("need to select a specific feed")
-		}
-		for _, feed := range OwnFeeds {
-			feed.Append(opt_write)
-			feed.Commit(path.Join(workdir, feed.ID()))
-		}
-		os.Exit(0)
-	}
-
-	if opt_name != "" {
-		if len(OwnFeeds) != 1 {
-			log.Fatal("need to select a specific feed")
-		}
-		for _, feed := range OwnFeeds {
-			feed.Metadata.Name = opt_name
-			feed.Commit(path.Join(workdir, feed.ID()))
-		}
-		os.Exit(0)
-	}
-
-	if opt_publish {
-		if len(OwnFeeds) != 1 {
-			log.Fatal("need to select a specific feed")
-		}
-		for _, feed := range OwnFeeds {
-			feedBytes, err := ioutil.ReadFile(path.Join(workdir, feed.ID()))
-			if err != nil {
-				log.Fatal(err)
-			}
-			r, err := http.NewRequest("POST", opt_node+"/"+feed.ID(), bytes.NewBuffer(feedBytes))
-			if err != nil {
-				panic(err)
-			}
-			client := &http.Client{}
-			res, err := client.Do(r)
-			if err != nil {
-				panic(err)
-			}
-			defer res.Body.Close()
-		}
-		os.Exit(0)
-	}
 
 	if opt_follow != "" {
 		addFollow(opt_node, workdir, opt_follow)
