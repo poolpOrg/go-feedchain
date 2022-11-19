@@ -670,6 +670,7 @@ func serveRSS(w http.ResponseWriter, r *http.Request) {
 		}
 		feedItems = append(feedItems, &feeds.Item{
 			Id:          block.ID(),
+			Title:       block.Message,
 			Link:        &feeds.Link{Href: "//" + r.Host + "/" + feedId},
 			Description: block.Message,
 			Created:     time.UnixMilli(block.CreationTime),
