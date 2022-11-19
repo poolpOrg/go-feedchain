@@ -64,7 +64,6 @@ type FeedBlock struct {
 
 type FeedSummary struct {
 	PublicKey string `json:"public_key"`
-	Origin    string `json:"origin"`
 	Size      int    `json:"length"`
 }
 
@@ -193,7 +192,6 @@ func apiLookup(w http.ResponseWriter, r *http.Request) {
 			}
 
 			feedSummary := FeedSummary{
-				Origin:    feed.Metadata.Origin,
 				Size:      len(feed.Index.Records),
 				PublicKey: feed.ID(),
 			}
@@ -625,7 +623,6 @@ func apiFeeds(w http.ResponseWriter, r *http.Request) {
 			defer feed.Close()
 
 			feedSummary := FeedSummary{
-				Origin:    feed.Metadata.Origin,
 				Size:      len(feed.Index.Records),
 				PublicKey: feed.ID(),
 			}

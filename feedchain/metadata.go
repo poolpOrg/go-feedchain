@@ -5,13 +5,10 @@ import (
 )
 
 type Metadata struct {
-	Banner      string `json:"banner"`
 	Picture     string `json:"picture"`
 	Name        string `json:"name"`
-	DisplayName string `json:"display_name"`
 	Description string `json:"description"`
 	Location    string `json:"location"`
-	Origin      string `json:"origin"`
 }
 
 func NewMetadata() *Metadata {
