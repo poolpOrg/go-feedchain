@@ -1,13 +1,16 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io/fs"
 	"log"
+	"net/http"
 	"os"
 	"os/user"
 	"path"
+	"strings"
 	"time"
 
 	"github.com/poolpOrg/feedchain/feedchain"
@@ -23,7 +26,6 @@ type FeedWatcher struct {
 
 type FeedSummary struct {
 	PublicKey string `json:"public_key"`
-	Origin    string `json:"origin"`
 	Size      int    `json:"length"`
 }
 
@@ -89,12 +91,91 @@ func (fw *FeedWatcher) Run(beginOffset int) {
 
 }
 
+func addFollow(node string, workdir string, follow string) error {
+	if !strings.Contains(follow, "/") {
+		r, err := http.NewRequest("GET", node+"/lookup/"+follow, nil)
+		if err != nil {
+			panic(err)
+		}
+		client := &http.Client{}
+		res, err := client.Do(r)
+		if err != nil {
+			panic(err)
+		}
+		defer res.Body.Close()
+
+		var ret []FeedSummary
+		err = json.NewDecoder(res.Body).Decode(&ret)
+		if err != nil {
+			return err
+		}
+
+		for _, record := range ret {
+			rd, err := feedchain.NewReaderFromURL(node + "/" + record.PublicKey)
+			if err != nil {
+				return err
+			}
+			tmp := strings.Split(node, "://")
+			origin := tmp[1]
+
+			os.MkdirAll(path.Join(workdir, "follows", origin), 0700)
+			fp, err := os.Create(path.Join(workdir, "follows", origin, rd.ID()))
+			if err != nil {
+				return err
+			}
+			fp.Close()
+			rd.Close()
+		}
+
+	} else {
+		rd, err := feedchain.NewReaderFromURL(follow)
+		if err != nil {
+			return err
+		}
+		tmp := strings.Split(follow, "/")
+		origin := strings.Join(tmp[0:len(tmp)-1], "/")
+		os.MkdirAll(path.Join(workdir, "follows", origin), 0700)
+		fp, err := os.Create(path.Join(workdir, "follows", origin, rd.ID()))
+		if err != nil {
+			return err
+		}
+		fp.Close()
+		rd.Close()
+	}
+	return nil
+}
+
+func removeFollow(workdir string, follow string) error {
+	fsys := os.DirFS(path.Join(workdir, "follows"))
+	fs.WalkDir(fsys, ".", func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if d.Type().IsRegular() {
+			rd, err := feedchain.NewReaderFromURL(p)
+			if err != nil {
+				return err
+			}
+			if follow == rd.ID() || follow == rd.Metadata.Name {
+				os.Remove(path.Join(workdir, "follows", p))
+			}
+			rd.Close()
+		}
+		return nil
+	})
+	return nil
+}
+
 func main() {
 	var opt_node string
 	var opt_begin int
+	var opt_follow string
+	var opt_unfollow string
 
 	flag.StringVar(&opt_node, "node", "https://feeds.poolp.org", "set the default node for network operations")
 	flag.IntVar(&opt_begin, "begin", 1, "display messages at most n days old")
+	flag.StringVar(&opt_follow, "follow", "", "feed to follow")
+	flag.StringVar(&opt_unfollow, "unfollow", "", "feed to unfollow")
 	flag.Parse()
 
 	userDefault, err := user.Current()
@@ -104,6 +185,16 @@ func main() {
 	workdir := path.Join(userDefault.HomeDir, ".feedchain")
 	os.MkdirAll(workdir, 0700)
 	os.MkdirAll(path.Join(workdir, "keys"), 0700)
+
+	if opt_follow != "" {
+		addFollow(opt_node, workdir, opt_follow)
+		os.Exit(0)
+	}
+
+	if opt_unfollow != "" {
+		removeFollow(workdir, opt_unfollow)
+		os.Exit(0)
+	}
 
 	WatchFeeds = make(map[string]*FeedWatcher)
 	for {
