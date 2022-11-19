@@ -657,8 +657,8 @@ func serveRSS(w http.ResponseWriter, r *http.Request) {
 	feedinfo := &feeds.Feed{
 		Title:       feedId,
 		Link:        &feeds.Link{Href: "/" + feedId},
-		Description: "Feed for" + feedId,
-		Author:      &feeds.Author{Name: feedId},
+		Description: feed.Metadata.Description,
+		Author:      &feeds.Author{Name: feed.Metadata.Name},
 		Created:     time.Now(),
 	}
 
@@ -670,10 +670,9 @@ func serveRSS(w http.ResponseWriter, r *http.Request) {
 		}
 		feedItems = append(feedItems, &feeds.Item{
 			Id:          block.ID(),
-			Title:       block.Message,
 			Link:        &feeds.Link{Href: "//" + r.Host + "/" + feedId},
 			Description: block.Message,
-			Created:     time.Now(),
+			Created:     time.UnixMilli(block.CreationTime),
 		})
 		feedinfo.Items = feedItems
 	}
