@@ -30,7 +30,7 @@ type StreamReader struct {
 	MetadataChecksum  string
 	MetadataSignature string
 
-	cursor int
+	cursor uint64
 }
 
 func NewReaderFromFile(pathname string) (*StreamReader, error) {
@@ -166,13 +166,13 @@ func (stream *StreamReader) Size() uint64 {
 	return uint64(len(stream.Index.Records))
 }
 
-func (stream *StreamReader) Next() *Block {
-	if stream.cursor == len(stream.Blocks) {
-		return nil
+func (stream *StreamReader) Next() (*Block, error) {
+	block, err := stream.Offset(uint64(stream.cursor + 1))
+	if err != nil {
+		return nil, err
 	}
-	currentOffset := stream.cursor
 	stream.cursor++
-	return stream.Blocks[currentOffset]
+	return block, nil
 }
 
 func (stream *StreamReader) Close() error {
