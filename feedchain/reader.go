@@ -29,6 +29,8 @@ type StreamReader struct {
 
 	MetadataChecksum  string
 	MetadataSignature string
+
+	cursor int
 }
 
 func NewReaderFromFile(pathname string) (*StreamReader, error) {
@@ -102,6 +104,8 @@ func NewReader(rd io.ReadSeekCloser) (*StreamReader, error) {
 
 		MetadataChecksum:  base64.RawURLEncoding.EncodeToString(metadataChecksum[:]),
 		MetadataSignature: base64.RawURLEncoding.EncodeToString(header.MetadataSignature[:]),
+
+		cursor: 0,
 	}
 
 	return stream, nil
@@ -160,6 +164,15 @@ func (stream *StreamReader) Offset(offset uint64) (*Block, error) {
 
 func (stream *StreamReader) Size() uint64 {
 	return uint64(len(stream.Index.Records))
+}
+
+func (stream *StreamReader) Next() *Block {
+	if stream.cursor == len(stream.Blocks) {
+		return nil
+	}
+	currentOffset := stream.cursor
+	stream.cursor++
+	return stream.Blocks[currentOffset]
 }
 
 func (stream *StreamReader) Close() error {
