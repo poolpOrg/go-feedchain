@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -69,6 +70,51 @@ type FeedSummary struct {
 
 var repositoryPath string
 
+// cache memoizes parsed feed bytes to avoid re-reading every file on every
+// request.
+var cache = newFeedCache()
+
+// maxFeedSize bounds how large a single posted feed may be, to prevent a
+// disk-fill denial of service.
+const maxFeedSize = 32 << 20 // 32 MiB
+
+// validFeedID matches a feed identifier: a base64 RawURL-encoded ed25519
+// public key (43 chars from the [A-Za-z0-9_-] alphabet). Constraining it here
+// also prevents path traversal, since the id is used to build a filesystem
+// path under repositoryPath.
+var validFeedID = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
+
+// feedPath returns the on-disk path for feedId, or ok=false if feedId is not a
+// well-formed feed identifier (which also guards against path traversal).
+func feedPath(feedId string) (string, bool) {
+	if !validFeedID.MatchString(feedId) {
+		return "", false
+	}
+	return filepath.Join(repositoryPath, feedId), true
+}
+
+// openFeed validates feedId, opens and verifies the feed, and confirms its
+// identity matches the request. On any failure it writes an appropriate HTTP
+// error response and returns ok=false; callers should simply return.
+func openFeed(w http.ResponseWriter, feedId string) (*feedchain.StreamReader, bool) {
+	path, ok := feedPath(feedId)
+	if !ok {
+		http.Error(w, "invalid feed id", http.StatusBadRequest)
+		return nil, false
+	}
+	feed, err := cache.reader(path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return nil, false
+	}
+	if feed.ID() != feedId {
+		feed.Close()
+		http.Error(w, "feed id mismatch", http.StatusForbidden)
+		return nil, false
+	}
+	return feed, true
+}
+
 func empty(w http.ResponseWriter, r *http.Request) {
 }
 
@@ -76,8 +122,14 @@ func serveFeed(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	feedId := vars["feedId"]
 
+	path, ok := feedPath(feedId)
+	if !ok {
+		http.Error(w, "invalid feed id", http.StatusBadRequest)
+		return
+	}
+
 	if r.Method == "HEAD" || r.Method == "GET" {
-		file, err := os.Open(repositoryPath + "/" + feedId)
+		file, err := os.Open(path)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
 			return
@@ -140,18 +192,31 @@ func serveFeed(w http.ResponseWriter, r *http.Request) {
 			w.Write(buf)
 		}
 	} else if r.Method == "POST" {
-		file, err := ioutil.TempFile("/tmp", "feedchain.")
-		if err != nil {
-			log.Fatal(err)
-		}
-		defer os.Remove(file.Name())
-
-		_, err = io.Copy(file, r.Body)
+		// Stage the upload inside the repository dir so the final rename is a
+		// cheap same-filesystem operation, and so a failed upload never lands
+		// in the served path.
+		file, err := ioutil.TempFile(repositoryPath, ".feedchain.upload.")
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
+		defer os.Remove(file.Name())
+
+		// Bound the upload: an unbounded io.Copy from the request body is a
+		// trivial disk-fill DoS. A LimitReader of maxFeedSize+1 lets us detect
+		// oversize uploads rather than silently truncating them.
+		limited := io.LimitReader(r.Body, maxFeedSize+1)
+		written, err := io.Copy(file, limited)
+		if err != nil {
+			file.Close()
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 		file.Close()
+		if written > maxFeedSize {
+			http.Error(w, "feed too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 
 		feed, err := feedchain.NewReaderFromFile(file.Name())
 		if err != nil {
@@ -159,18 +224,23 @@ func serveFeed(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		// The feed self-certifies: its ID is its public key, and the whole file
+		// is signature-verified by NewReaderFromFile. Reject a feed posted to
+		// the wrong path.
 		if feed.ID() != feedId {
-			http.Error(w, err.Error(), http.StatusForbidden)
+			feed.Close()
+			http.Error(w, "feed id does not match request path", http.StatusForbidden)
 			return
 		}
+		feed.Close()
 
-		err = os.Rename(file.Name(), repositoryPath+"/"+feed.ID())
-		if err != nil {
+		dest := filepath.Join(repositoryPath, feed.ID())
+		if err := os.Rename(file.Name(), dest); err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-
-		feed.Close()
+		// Drop any stale cached copy so the new contents are served at once.
+		cache.invalidate(dest)
 	}
 }
 
@@ -211,17 +281,11 @@ func apiFeed(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	feedId := vars["feedId"]
 
-	feed, err := feedchain.NewReaderFromFile(repositoryPath + "/" + feedId)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	feed, ok := openFeed(w, feedId)
+	if !ok {
 		return
 	}
 	defer feed.Close()
-
-	if feed.ID() != feedId {
-		http.Error(w, err.Error(), http.StatusForbidden)
-		return
-	}
 
 	feedIndex := FeedIndex{}
 	feedIndex.Digest = feed.IndexChecksum
@@ -274,17 +338,11 @@ func apiFeedBlock(w http.ResponseWriter, r *http.Request) {
 	feedId := vars["feedId"]
 	blockId := vars["blockId"]
 
-	feed, err := feedchain.NewReaderFromFile(repositoryPath + "/" + feedId)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	feed, ok := openFeed(w, feedId)
+	if !ok {
 		return
 	}
 	defer feed.Close()
-
-	if feed.ID() != feedId {
-		http.Error(w, err.Error(), http.StatusForbidden)
-		return
-	}
 
 	for i := 0; i < len(feed.Index.Records); i++ {
 		record := feed.Index.Records[i]
@@ -324,17 +382,11 @@ func apiFeedBlockPayloadOffset(w http.ResponseWriter, r *http.Request) {
 	blockId := vars["blockId"]
 	payloadOffset := vars["payloadOffset"]
 
-	feed, err := feedchain.NewReaderFromFile(repositoryPath + "/" + feedId)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	feed, ok := openFeed(w, feedId)
+	if !ok {
 		return
 	}
 	defer feed.Close()
-
-	if feed.ID() != feedId {
-		http.Error(w, err.Error(), http.StatusForbidden)
-		return
-	}
 
 	payloadOffsetInt, err := strconv.Atoi(payloadOffset)
 	if err != nil {
@@ -380,17 +432,11 @@ func apiFeedBlockPayloadOffsetRaw(w http.ResponseWriter, r *http.Request) {
 	blockId := vars["blockId"]
 	payloadOffset := vars["payloadOffset"]
 
-	feed, err := feedchain.NewReaderFromFile(repositoryPath + "/" + feedId)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	feed, ok := openFeed(w, feedId)
+	if !ok {
 		return
 	}
 	defer feed.Close()
-
-	if feed.ID() != feedId {
-		http.Error(w, err.Error(), http.StatusForbidden)
-		return
-	}
 
 	payloadOffsetInt, err := strconv.Atoi(payloadOffset)
 	if err != nil {
@@ -439,17 +485,11 @@ func apiFeedOffset(w http.ResponseWriter, r *http.Request) {
 	feedId := vars["feedId"]
 	offset := vars["offset"]
 
-	feed, err := feedchain.NewReaderFromFile(repositoryPath + "/" + feedId)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	feed, ok := openFeed(w, feedId)
+	if !ok {
 		return
 	}
 	defer feed.Close()
-
-	if feed.ID() != feedId {
-		http.Error(w, err.Error(), http.StatusForbidden)
-		return
-	}
 
 	offsetInt, err := strconv.Atoi(offset)
 	if err != nil {
@@ -494,17 +534,11 @@ func apiFeedOffsetPayloadOffset(w http.ResponseWriter, r *http.Request) {
 	offset := vars["offset"]
 	payloadOffset := vars["payloadOffset"]
 
-	feed, err := feedchain.NewReaderFromFile(repositoryPath + "/" + feedId)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	feed, ok := openFeed(w, feedId)
+	if !ok {
 		return
 	}
 	defer feed.Close()
-
-	if feed.ID() != feedId {
-		http.Error(w, err.Error(), http.StatusForbidden)
-		return
-	}
 
 	offsetInt, err := strconv.Atoi(offset)
 	if err != nil {
@@ -554,17 +588,11 @@ func apiFeedOffsetPayloadOffsetRaw(w http.ResponseWriter, r *http.Request) {
 	offset := vars["offset"]
 	payloadOffset := vars["payloadOffset"]
 
-	feed, err := feedchain.NewReaderFromFile(repositoryPath + "/" + feedId)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	feed, ok := openFeed(w, feedId)
+	if !ok {
 		return
 	}
 	defer feed.Close()
-
-	if feed.ID() != feedId {
-		http.Error(w, err.Error(), http.StatusForbidden)
-		return
-	}
 
 	offsetInt, err := strconv.Atoi(offset)
 	if err != nil {
@@ -648,11 +676,11 @@ func serveRSS(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	feedId := vars["feedId"]
 
-	feed, err := feedchain.NewReaderFromFile(repositoryPath + "/" + feedId)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	feed, ok := openFeed(w, feedId)
+	if !ok {
 		return
 	}
+	defer feed.Close()
 
 	feedinfo := &feeds.Feed{
 		Title:       feedId,
@@ -679,7 +707,6 @@ func serveRSS(w http.ResponseWriter, r *http.Request) {
 	}
 	rssFeed := (&feeds.Rss{Feed: feedinfo}).RssFeed()
 	xmlRssFeeds := rssFeed.FeedXml()
-	fmt.Println(xmlRssFeeds)
 	w.Header().Add("Content-Type", "application/rss+xml")
 
 	xml.NewEncoder(w).Encode(xmlRssFeeds)
@@ -695,31 +722,20 @@ func enableCORS(router *mux.Router) {
 func middlewareCors(next http.Handler) http.Handler {
 	return http.HandlerFunc(
 		func(w http.ResponseWriter, req *http.Request) {
+			// Feeds are public, read-only and credential-free. A wildcard
+			// origin is correct here, but it is mutually exclusive with
+			// Allow-Credentials: true (browsers reject that combination), so we
+			// do not set credentials.
 			w.Header().Set("Access-Control-Allow-Origin", "*")
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS, PUT, DELETE")
-			w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, X-CSRF-Token, Authorization")
+			w.Header().Set("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Accept, Content-Type, Content-Length, Accept-Encoding, Range")
 			next.ServeHTTP(w, req)
 		})
 }
 
-func main() {
-	var port int
-
-	flag.IntVar(&port, "port", 8091, "port")
-	flag.StringVar(&repositoryPath, "path", "/var/feedchains", "path to repository")
-	flag.Parse()
-
-	err := os.MkdirAll(repositoryPath, 0700)
-	if err != nil {
-		log.Fatal(err)
-	}
-
+func newRouter() *mux.Router {
 	r := mux.NewRouter()
 	enableCORS(r)
-
-	//r.HandleFunc("/", apiFeeds)
-	//r.HandleFunc("/feeds", apiFeeds)
 
 	r.HandleFunc("/lookup/{name}", apiLookup)
 
@@ -735,6 +751,23 @@ func main() {
 	r.HandleFunc("/api/{feedId}/offset/{offset}", apiFeedOffset)
 	r.HandleFunc("/api/{feedId}/offset/{offset}/payload/{payloadOffset}", apiFeedOffsetPayloadOffset)
 	r.HandleFunc("/api/{feedId}/offset/{offset}/payload/{payloadOffset}/raw", apiFeedOffsetPayloadOffsetRaw)
+
+	return r
+}
+
+func main() {
+	var port int
+
+	flag.IntVar(&port, "port", 8091, "port")
+	flag.StringVar(&repositoryPath, "path", "/var/feedchains", "path to repository")
+	flag.Parse()
+
+	err := os.MkdirAll(repositoryPath, 0700)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	r := newRouter()
 
 	err = http.ListenAndServe(fmt.Sprintf(":%d", port), handlers.CombinedLoggingHandler(os.Stdout, r))
 	if err != nil {
