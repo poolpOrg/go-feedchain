@@ -19,7 +19,7 @@ func NewHTTPReader(url string) (*HTTPReader, error) {
 	var resp *http.Response
 	var err error
 
-	if strings.HasPrefix(url, "https://") || strings.HasPrefix(url, "https://") {
+	if strings.HasPrefix(url, "https://") || strings.HasPrefix(url, "http://") {
 		resp, err = http.Head(url)
 		if err != nil {
 			return nil, err
@@ -61,7 +61,9 @@ func (hr *HTTPReader) Read(buf []byte) (int, error) {
 		return 0, err
 	}
 
-	req.Header.Add("Range", fmt.Sprintf("bytes=%d-%d", hr.offset, hr.offset+int64(len(buf))))
+	// HTTP byte ranges are inclusive on both ends, so the last byte we want
+	// is offset+len(buf)-1.
+	req.Header.Add("Range", fmt.Sprintf("bytes=%d-%d", hr.offset, hr.offset+int64(len(buf))-1))
 	resp, err := hr.client.Do(req)
 	if err != nil {
 		return -1, err
@@ -69,11 +71,18 @@ func (hr *HTTPReader) Read(buf []byte) (int, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode/100 != 2 {
-		return 0, fmt.Errorf("NOT OK")
+		return 0, fmt.Errorf("unexpected status %s requesting %s", resp.Status, hr.url)
 	}
 
-	n, err := resp.Body.Read(buf)
+	// A single Read is not guaranteed to fill buf; drain the body so callers
+	// that assume buf is fully populated (block/index parsing) are not fed a
+	// silently truncated buffer.
+	n, err := io.ReadFull(resp.Body, buf)
 	hr.offset += int64(n)
+	if err == io.ErrUnexpectedEOF {
+		// Fewer bytes than requested (e.g. tail of the feed): report a clean EOF.
+		err = io.EOF
+	}
 	return n, err
 }
 

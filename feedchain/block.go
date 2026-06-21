@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
-	"log"
 )
 
 type Payload struct {
@@ -21,14 +20,12 @@ type Block struct {
 	Parent       string    `json:"parent"`
 }
 
-func NewBlockFromBytes(buffer []byte) *Block {
+func NewBlockFromBytes(buffer []byte) (*Block, error) {
 	var block Block
-	err := json.Unmarshal(buffer, &block)
-	if err != nil {
-		log.Fatal(err)
-		panic("block.NewBlockFromBytes")
+	if err := json.Unmarshal(buffer, &block); err != nil {
+		return nil, fmt.Errorf("block.NewBlockFromBytes: %w", err)
 	}
-	return &block
+	return &block, nil
 }
 
 func (block *Block) ToBytes() []byte {

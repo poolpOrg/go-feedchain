@@ -2,6 +2,7 @@ package feedchain
 
 import (
 	"encoding/json"
+	"fmt"
 )
 
 type Metadata struct {
@@ -32,6 +33,20 @@ func (metadata *Metadata) ToBytes() []byte {
 	return serialized
 }
 
-func (metadata *Metadata) Set(key string, value string) {
-
+// Set assigns value to the named metadata field. It returns an error for an
+// unknown key rather than silently doing nothing.
+func (metadata *Metadata) Set(key string, value string) error {
+	switch key {
+	case "picture":
+		metadata.Picture = value
+	case "name":
+		metadata.Name = value
+	case "description":
+		metadata.Description = value
+	case "location":
+		metadata.Location = value
+	default:
+		return fmt.Errorf("metadata.Set: unknown key %q", key)
+	}
+	return nil
 }
