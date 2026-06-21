@@ -38,7 +38,9 @@ func (fw *FeedWatcher) Stop() {
 }
 
 func (fw *FeedWatcher) Run(beginOffset int) {
-	refreshRate := time.Duration(0)
+	const minRefreshRate = 1  // seconds
+	const maxRefreshRate = 30 // seconds
+	refreshRate := minRefreshRate
 	lastFeedChecksum := ""
 	lastBlockCtime := 0
 	begin := time.Now().AddDate(0, 0, -beginOffset).UnixMilli()
@@ -48,20 +50,24 @@ func (fw *FeedWatcher) Run(beginOffset int) {
 			break
 		}
 
-		time.Sleep(refreshRate * time.Second)
+		// refreshRate is a number of seconds; never sleep for 0 (busy-loop).
+		time.Sleep(time.Duration(refreshRate) * time.Second)
 
 		rd, err := feedchain.NewReaderFromURL(fw.source)
 		if err != nil {
-			fmt.Printf("[warning] could not obtain feed for %s, pausing source", fw.publicKey)
-			refreshRate = 30
+			fmt.Printf("[warning] could not obtain feed for %s, pausing source\n", fw.publicKey)
+			refreshRate = maxRefreshRate
 			continue
 		}
 		if rd.HeaderChecksum == lastFeedChecksum || len(rd.Index.Records) == 0 {
-			if refreshRate < 30 {
-				refreshRate += 1
+			if refreshRate < maxRefreshRate {
+				refreshRate++
 			}
+			rd.Close()
 			continue
 		}
+		// New content: reset to the fast poll rate.
+		refreshRate = minRefreshRate
 		lastFeedChecksum = rd.HeaderChecksum
 
 		for i := 0; i < len(rd.Index.Records); i++ {
@@ -85,8 +91,6 @@ func (fw *FeedWatcher) Run(beginOffset int) {
 		}
 
 		rd.Close()
-
-		time.Sleep(refreshRate * time.Second)
 	}
 
 }
