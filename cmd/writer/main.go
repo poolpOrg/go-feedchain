@@ -50,8 +50,11 @@ func createFeedchain(workdir string, name string) error {
 	}
 	feed.Metadata.Name = name
 
-	err = os.WriteFile(path.Join(workdir, "keys", base64.RawURLEncoding.EncodeToString(priv)), []byte(""), 0700)
+	passphrase, err := readPassphrase(true)
 	if err != nil {
+		return err
+	}
+	if err := writeEncryptedKey(workdir, priv, passphrase); err != nil {
 		return err
 	}
 
@@ -64,10 +67,29 @@ func loadKeys(workdir string) error {
 	if err != nil {
 		return err
 	}
+	if len(files) == 0 {
+		return nil
+	}
+
+	passphrase, err := readPassphrase(false)
+	if err != nil {
+		return err
+	}
+
 	for _, f := range files {
-		priv, err := base64.RawURLEncoding.DecodeString(f.Name())
+		// The filename is the public key (feed id); the encrypted private key
+		// lives in the file contents. Files that are not well-formed encrypted
+		// keys (e.g. legacy plaintext-filename keys) are skipped.
+		if _, err := base64.RawURLEncoding.DecodeString(f.Name()); err != nil {
+			continue
+		}
+		data, err := os.ReadFile(path.Join(workdir, "keys", f.Name()))
 		if err != nil {
 			return err
+		}
+		priv, err := decryptKey(data, passphrase)
+		if err != nil {
+			return fmt.Errorf("key %s: %w", f.Name(), err)
 		}
 		Keys[f.Name()] = priv
 	}
@@ -75,12 +97,8 @@ func loadKeys(workdir string) error {
 }
 
 func keyForFeed(feedname string) ed25519.PrivateKey {
-	var priv ed25519.PrivateKey
-	for key, _ := range Keys {
-		priv = Keys[key]
-		if base64.RawURLEncoding.EncodeToString(priv.Public().(ed25519.PublicKey)) == feedname {
-			return priv
-		}
+	if priv, ok := Keys[feedname]; ok {
+		return ed25519.PrivateKey(priv)
 	}
 	return nil
 }
@@ -140,6 +158,11 @@ func main() {
 		err := createFeedchain(workdir, opt_name)
 		if err != nil {
 			log.Fatal(err)
+		}
+		// If create was the only requested action, stop here so we don't
+		// prompt a second time to load keys we won't use.
+		if opt_write == "" && opt_newname == "" && !opt_publish {
+			return
 		}
 	}
 
