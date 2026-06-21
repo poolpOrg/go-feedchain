@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strings"
@@ -85,11 +86,15 @@ func NewWriter(privateKey ed25519.PrivateKey, pathname string) (*StreamWriter, e
 
 	// read header signature
 	var headerSignature [64]byte
-	f.Read(headerSignature[:])
+	if _, err := io.ReadFull(f, headerSignature[:]); err != nil {
+		return nil, err
+	}
 
 	// read header
 	var headerBuf [HeaderSize]byte
-	f.Read(headerBuf[:])
+	if _, err := io.ReadFull(f, headerBuf[:]); err != nil {
+		return nil, err
+	}
 	header := NewHeaderFromBytes(headerBuf)
 	headerChecksum := sha256.Sum256(headerBuf[:])
 
@@ -102,7 +107,9 @@ func NewWriter(privateKey ed25519.PrivateKey, pathname string) (*StreamWriter, e
 		return nil, err
 	}
 	indexBuf := make([]byte, header.IndexLength)
-	f.Read(indexBuf)
+	if _, err := io.ReadFull(f, indexBuf); err != nil {
+		return nil, err
+	}
 	indexChecksum := sha256.Sum256(indexBuf[:])
 
 	if !bytes.Equal(indexChecksum[:], header.IndexChecksum[:]) {
@@ -114,7 +121,9 @@ func NewWriter(privateKey ed25519.PrivateKey, pathname string) (*StreamWriter, e
 		return nil, err
 	}
 	metadataBuf := make([]byte, header.MetadataLength)
-	f.Read(metadataBuf)
+	if _, err := io.ReadFull(f, metadataBuf); err != nil {
+		return nil, err
+	}
 	metadata := NewMetadataFromBytes(metadataBuf)
 	metadataChecksum := sha256.Sum256(metadataBuf[:])
 
@@ -138,14 +147,19 @@ func NewWriter(privateKey ed25519.PrivateKey, pathname string) (*StreamWriter, e
 
 	for _, record := range stream.Index.Records {
 		blockBuffer := make([]byte, record.BlockLen)
-		f.Read(blockBuffer)
+		if _, err := io.ReadFull(f, blockBuffer); err != nil {
+			return nil, err
+		}
 		checksum := sha256.Sum256(blockBuffer)
 
 		if base64.RawURLEncoding.EncodeToString(checksum[:]) != record.BlockChecksum {
 			return nil, fmt.Errorf("chunk mismatches index checksum")
 		}
 
-		block := NewBlockFromBytes(blockBuffer)
+		block, err := NewBlockFromBytes(blockBuffer)
+		if err != nil {
+			return nil, err
+		}
 		if !stream.Verify(block) {
 			return nil, fmt.Errorf("chunk mismatches index signature")
 		}

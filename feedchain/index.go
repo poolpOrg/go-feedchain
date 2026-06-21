@@ -76,9 +76,9 @@ func (index *Index) Tag(hashtag string, blockChecksum [32]byte) {
 
 func (index *Index) Mention(mention string, blockChecksum [32]byte) {
 	if _, exists := index.Mentions[mention]; !exists {
-		index.References[mention] = make([]string, 0)
+		index.Mentions[mention] = make([]string, 0)
 	}
-	index.References[mention] = append(index.References[mention], base64.RawURLEncoding.EncodeToString(blockChecksum[:]))
+	index.Mentions[mention] = append(index.Mentions[mention], base64.RawURLEncoding.EncodeToString(blockChecksum[:]))
 }
 
 func (index *Index) Reference(ref string, blockChecksum [32]byte) {

@@ -52,10 +52,14 @@ func NewReaderFromURL(url string) (*StreamReader, error) {
 func NewReader(rd io.ReadSeekCloser) (*StreamReader, error) {
 	// read header signature
 	var headerSignature [64]byte
-	rd.Read(headerSignature[:])
+	if _, err := io.ReadFull(rd, headerSignature[:]); err != nil {
+		return nil, err
+	}
 
 	var headerBuf [HeaderSize]byte
-	rd.Read(headerBuf[:])
+	if _, err := io.ReadFull(rd, headerBuf[:]); err != nil {
+		return nil, err
+	}
 	header := NewHeaderFromBytes(headerBuf)
 	headerChecksum := sha256.Sum256(headerBuf[:])
 
@@ -68,7 +72,9 @@ func NewReader(rd io.ReadSeekCloser) (*StreamReader, error) {
 		return nil, err
 	}
 	indexBuf := make([]byte, header.IndexLength)
-	rd.Read(indexBuf)
+	if _, err := io.ReadFull(rd, indexBuf); err != nil {
+		return nil, err
+	}
 	index := NewIndexFromBytes(indexBuf)
 	indexChecksum := sha256.Sum256(indexBuf[:])
 
@@ -81,7 +87,9 @@ func NewReader(rd io.ReadSeekCloser) (*StreamReader, error) {
 		return nil, err
 	}
 	metadataBuf := make([]byte, header.MetadataLength)
-	rd.Read(metadataBuf)
+	if _, err := io.ReadFull(rd, metadataBuf); err != nil {
+		return nil, err
+	}
 	metadata := NewMetadataFromBytes(metadataBuf)
 	metadataChecksum := sha256.Sum256(metadataBuf[:])
 
@@ -142,11 +150,8 @@ func (stream *StreamReader) Offset(offset uint64) (*Block, error) {
 	}
 
 	blockBuffer := make([]byte, record.BlockLen)
-	n, err := stream.rd.Read(blockBuffer)
-	if err != nil {
-		if err == io.EOF && n != int(record.BlockLen) {
-			return nil, err
-		}
+	if _, err := io.ReadFull(stream.rd, blockBuffer); err != nil {
+		return nil, err
 	}
 	checksum := sha256.Sum256(blockBuffer)
 
@@ -154,7 +159,10 @@ func (stream *StreamReader) Offset(offset uint64) (*Block, error) {
 		return nil, fmt.Errorf("chunk mismatches index checksum")
 	}
 
-	block := NewBlockFromBytes(blockBuffer)
+	block, err := NewBlockFromBytes(blockBuffer)
+	if err != nil {
+		return nil, err
+	}
 	if !stream.Verify(block) {
 		return nil, fmt.Errorf("chunk mismatches index signature")
 	}
@@ -167,7 +175,7 @@ func (stream *StreamReader) Size() uint64 {
 }
 
 func (stream *StreamReader) Next() (*Block, error) {
-	block, err := stream.Offset(uint64(stream.cursor + 1))
+	block, err := stream.Offset(stream.cursor)
 	if err != nil {
 		return nil, err
 	}
