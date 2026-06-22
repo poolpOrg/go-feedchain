@@ -82,6 +82,10 @@ func NewReader(rd io.ReadSeekCloser) (*StreamReader, error) {
 		return nil, fmt.Errorf("index checksum verification failed")
 	}
 
+	if !ed25519.Verify(header.PublicKey, indexChecksum[:], header.IndexSignature[:]) {
+		return nil, fmt.Errorf("index signature verification failed")
+	}
+
 	_, err = rd.Seek(SignatureSize+HeaderSize+int64(header.MetadataOffset), 0)
 	if err != nil {
 		return nil, err
@@ -95,6 +99,10 @@ func NewReader(rd io.ReadSeekCloser) (*StreamReader, error) {
 
 	if !bytes.Equal(metadataChecksum[:], header.MetadataChecksum[:]) {
 		return nil, fmt.Errorf("metadata checksum verification failed")
+	}
+
+	if !ed25519.Verify(header.PublicKey, metadataChecksum[:], header.MetadataSignature[:]) {
+		return nil, fmt.Errorf("metadata signature verification failed")
 	}
 
 	stream := &StreamReader{
