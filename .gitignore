@@ -1,0 +1,9 @@
+# Compiled command binaries (named after their cmd/ package dir)
+/node
+/reader
+/watch
+/writer
+
+# Test and coverage artifacts
+*.test
+*.out
