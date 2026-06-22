@@ -162,11 +162,11 @@ produces for this struct, in this field order:
 1. Read bytes `[0,64)` → header signature; read `[64,330)` → header.
 2. Verify `ed25519.Verify(header.PublicKey, sha256(header), headerSig)`.
 3. Read index at `[330+IndexOffset, +IndexLength)`; check sha256 ==
-   `IndexChecksum`. (The current reader does not separately verify
-   `IndexSignature` on read, only the checksum; the signature is exposed for
-   callers.)
+   `IndexChecksum`, then `ed25519.Verify(PublicKey, IndexChecksum,
+   IndexSignature)`.
 4. Read metadata at `[330+MetadataOffset, +MetadataLength)`; check sha256 ==
-   `MetadataChecksum`.
+   `MetadataChecksum`, then `ed25519.Verify(PublicKey, MetadataChecksum,
+   MetadataSignature)`.
 5. For each record, read the block, check sha256 == `record.digest`, then
    `ed25519.Verify(PublicKey, digest, record.signature)`.
 
@@ -188,10 +188,8 @@ These are documented so a v2 can address them deliberately:
    on `Version`; today a v2 file would be mis-sliced as v1.
 4. **Mixed base64 alphabets.** `parent` uses RawStd, everything else uses
    RawURL. Pick one.
-5. **`Block.ID()` formatting.** `%016x` over a 32-byte hash yields 64 hex chars;
-   the width is misleading.
-6. **No canonical block encoding.** Signature verification is tied to Go's JSON
+5. **No canonical block encoding.** Signature verification is tied to Go's JSON
    output (see warning above).
-7. **Hash chain not enforced.** `parent` links exist but no reader verifies that
+6. **Hash chain not enforced.** `parent` links exist but no reader verifies that
    `records[i]`'s block parent equals `records[i-1]`'s digest, so the chain is
    currently decorative.

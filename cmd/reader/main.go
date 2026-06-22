@@ -38,7 +38,8 @@ func main() {
 		}
 
 		unixTimeUTC := time.UnixMilli(block.CreationTime).Format(time.RFC3339)
-		fmt.Printf("[%s] (sha256:%s...%s): %s\n", unixTimeUTC, block.ID()[0:4], block.ID()[64-4:], block.Message)
+		id := block.ID()
+		fmt.Printf("[%s] (sha256:%s...%s): %s\n", unixTimeUTC, id[:4], id[len(id)-4:], block.Message)
 	}
 
 	//	fmt.Println(rd)

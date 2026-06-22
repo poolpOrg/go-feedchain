@@ -2,6 +2,7 @@ package feedchain
 
 import (
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 )
@@ -36,7 +37,9 @@ func (block *Block) ToBytes() []byte {
 	return serialized
 }
 
+// ID returns the block's identifier: the hex-encoded sha256 of its serialized
+// bytes (64 hex characters).
 func (block *Block) ID() string {
 	checksum := sha256.Sum256(block.ToBytes())
-	return fmt.Sprintf("%016x", checksum)
+	return hex.EncodeToString(checksum[:])
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/rand"
+	"crypto/sha256"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -202,5 +203,93 @@ func TestNewBlockFromBytesError(t *testing.T) {
 	}
 	if _, err := NewBlockFromBytes([]byte(`{"message":"ok"}`)); err != nil {
 		t.Errorf("NewBlockFromBytes(valid) = %v, want nil", err)
+	}
+}
+
+// TestHeaderRoundTrip guards the hand-maintained header wire layout: every
+// field must survive ToBytes -> NewHeaderFromBytes unchanged, and the computed
+// end offset must equal the declared HeaderSize.
+func TestHeaderRoundTrip(t *testing.T) {
+	if headerEnd != HeaderSize {
+		t.Fatalf("header layout offsets sum to %d, but HeaderSize = %d", headerEnd, HeaderSize)
+	}
+
+	pub, _, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("GenerateKey: %v", err)
+	}
+	orig := &Header{
+		Version:        HeaderVersion,
+		GenerationTime: 1234567890,
+		IndexOffset:    111,
+		IndexLength:    222,
+		MetadataOffset: 333,
+		MetadataLength: 444,
+		PublicKey:      pub,
+	}
+	for i := range orig.IndexChecksum {
+		orig.IndexChecksum[i] = byte(i)
+		orig.MetadataChecksum[i] = byte(i + 100)
+	}
+	for i := range orig.IndexSignature {
+		orig.IndexSignature[i] = byte(i + 1)
+		orig.MetadataSignature[i] = byte(i + 2)
+	}
+
+	got := NewHeaderFromBytes(orig.ToBytes())
+
+	if got.Version != orig.Version || got.GenerationTime != orig.GenerationTime ||
+		got.IndexOffset != orig.IndexOffset || got.IndexLength != orig.IndexLength ||
+		got.MetadataOffset != orig.MetadataOffset || got.MetadataLength != orig.MetadataLength {
+		t.Errorf("scalar fields did not round-trip: got %+v", got)
+	}
+	if got.IndexChecksum != orig.IndexChecksum || got.MetadataChecksum != orig.MetadataChecksum ||
+		got.IndexSignature != orig.IndexSignature || got.MetadataSignature != orig.MetadataSignature {
+		t.Errorf("checksum/signature fields did not round-trip")
+	}
+	if !got.PublicKey.Equal(orig.PublicKey) {
+		t.Errorf("public key did not round-trip")
+	}
+}
+
+// TestIndexSignatureVerifiedOnRead confirms the reader rejects a feed whose
+// index signature is invalid even though the header is validly signed and the
+// index checksum still matches. This isolates the index-signature check added
+// to NewReader: we corrupt only the IndexSignature, then re-sign the header
+// with the real key so the header check passes and the index-signature check
+// is the one that must fail.
+func TestIndexSignatureVerifiedOnRead(t *testing.T) {
+	priv, path := newTestFeed(t, 2)
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+
+	// Parse the header, corrupt the index signature, and re-pack.
+	var headerBuf [HeaderSize]byte
+	copy(headerBuf[:], data[SignatureSize:SignatureSize+HeaderSize])
+	header := NewHeaderFromBytes(headerBuf)
+	header.IndexSignature[0] ^= 0xFF // now an invalid signature for IndexChecksum
+	newHeader := header.ToBytes()
+
+	// Re-sign the header so the header signature check (which runs first) passes.
+	newHeaderChecksum := sha256.Sum256(newHeader[:])
+	newHeaderSig := ed25519.Sign(priv, newHeaderChecksum[:])
+
+	copy(data[0:SignatureSize], newHeaderSig)
+	copy(data[SignatureSize:SignatureSize+HeaderSize], newHeader[:])
+
+	tmp := filepath.Join(t.TempDir(), "corrupt")
+	if err := os.WriteFile(tmp, data, 0600); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+
+	_, err = NewReaderFromFile(tmp)
+	if err == nil {
+		t.Fatal("NewReaderFromFile accepted a feed with a corrupted index signature")
+	}
+	if err.Error() != "index signature verification failed" {
+		t.Errorf("error = %q, want index signature verification failed", err)
 	}
 }
